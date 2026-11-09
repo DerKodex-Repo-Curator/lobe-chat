@@ -156,6 +156,7 @@ export const createAgentMailProvider = (
   /**
    * The bytes of a forwarded message's attachments. One the provider no longer
    * holds is skipped: its retention can be shorter than the mail's life here.
+   * Any other download failure fails the whole send.
    */
   const loadForwardedAttachments = async (
     ref: AgentAccountRef,
@@ -173,7 +174,9 @@ export const createAgentMailProvider = (
     const loaded = await pMap(
       wanted,
       async (attachment) => {
-        const bytes = await client.downloadAttachment(providerMessageId, attachment.index);
+        // Only an attachment past the provider's retention is left out; a
+        // transient failure throws, and the forward fails without sending.
+        const bytes = await client.fetchAttachment(providerMessageId, attachment.index);
         if (!bytes) return undefined;
         return {
           content: bytes.buffer.toString('base64'),

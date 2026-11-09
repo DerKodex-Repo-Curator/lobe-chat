@@ -260,6 +260,34 @@ export class LobeMailApiClient {
     }
   };
 
+  /**
+   * Download an attachment for re-sending it. Unlike {@link downloadAttachment},
+   * only an attachment the provider no longer holds (404 / 410) resolves to
+   * `null`; any other failure throws, so a forward is never sent short of an
+   * attachment that merely failed to load.
+   */
+  fetchAttachment = async (
+    messageId: string,
+    index: number,
+  ): Promise<null | { buffer: Buffer; contentType?: string }> => {
+    const path = `/v1/messages/${encodeURIComponent(messageId)}/attachments/${index}`;
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (response.status === 404 || response.status === 410) return null;
+    if (!response.ok) {
+      throw new LobeMailApiError(
+        response.status,
+        `Agent Mail GET ${path} failed: ${response.status}`,
+      );
+    }
+
+    return {
+      buffer: Buffer.from(await response.arrayBuffer()),
+      contentType: response.headers.get('content-type') ?? undefined,
+    };
+  };
+
   sendMessage = (
     inboxId: string,
     input: {

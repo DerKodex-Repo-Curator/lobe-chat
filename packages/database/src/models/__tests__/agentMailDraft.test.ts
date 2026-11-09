@@ -45,7 +45,7 @@ afterEach(async () => {
 
 describe('AgentMailDraftModel', () => {
   it('creates, reads, updates, lists and deletes', async () => {
-    const draft = await model.create({ ...base(), subject: 'hi', text: 'one' });
+    const draft = (await model.create({ ...base(), subject: 'hi', text: 'one' }))!;
     expect((await model.findById(draft.id))?.text).toBe('one');
 
     await model.update(draft.id, { text: 'two', to: [{ address: 'a@x.io' }] });
@@ -78,9 +78,9 @@ describe('AgentMailDraftModel', () => {
     expect(await model.count({ agentId })).toBe(2);
 
     const reply = { ...base(), mode: 'reply' as const, sourceMailId: mail.id };
-    const first = await model.create({ ...reply, text: 'first' });
-    const again = await model.create({ ...reply, text: 'second' });
-    const forward = await model.create({ ...reply, mode: 'forward' });
+    const first = (await model.create({ ...reply, text: 'first' }))!;
+    const again = (await model.create({ ...reply, text: 'second' }))!;
+    const forward = (await model.create({ ...reply, mode: 'forward' }))!;
 
     expect(again.id).toBe(first.id);
     expect(again.text).toBe('second');
@@ -88,7 +88,7 @@ describe('AgentMailDraftModel', () => {
   });
 
   it('lets one sender at a time claim a draft, and frees it on release', async () => {
-    const draft = await model.create(base());
+    const draft = (await model.create(base()))!;
 
     expect(await model.claimForSend(draft.id)).toBeDefined();
     expect(await model.claimForSend(draft.id)).toBeUndefined();
@@ -97,8 +97,42 @@ describe('AgentMailDraftModel', () => {
     expect(await model.claimForSend(draft.id)).toBeDefined();
   });
 
+  it('refuses edits while a send holds the draft, so none are lost', async () => {
+    const draft = await model.create({ ...base(), text: 'sent version' });
+    await model.claimForSend(draft.id);
+
+    expect(await model.update(draft.id, { text: 'late edit' })).toBeUndefined();
+    expect((await model.findById(draft.id))?.text).toBe('sent version');
+
+    await model.releaseSend(draft.id);
+    expect((await model.update(draft.id, { text: 'late edit' }))?.text).toBe('late edit');
+  });
+
+  it('refuses a resumed reply while that draft is being sent', async () => {
+    const { mail } = await AgentMailModel.record(
+      serverDB,
+      {
+        accountId,
+        agentId,
+        deliveredAt: new Date(),
+        direction: 'inbound',
+        fromAddress: 'a@x.io',
+        provider: 'agent-mail',
+        providerMessageId: 'draft_src_lease',
+        text: 'source',
+      },
+      { userId },
+    );
+    const reply = { ...base(), mode: 'reply' as const, sourceMailId: mail.id };
+    const draft = (await model.create({ ...reply, text: 'sent version' }))!;
+    await model.claimForSend(draft.id);
+
+    expect(await model.create({ ...reply, text: 'late edit' })).toBeUndefined();
+    expect((await model.findById(draft.id))?.text).toBe('sent version');
+  });
+
   it('hides drafts from anyone outside the scope', async () => {
-    const draft = await model.create(base());
+    const draft = (await model.create(base()))!;
     const stranger = new AgentMailDraftModel(serverDB, otherUserId);
 
     expect(await stranger.findById(draft.id)).toBeUndefined();

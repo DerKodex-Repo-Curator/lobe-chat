@@ -9,7 +9,7 @@ import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import { AgentAccountService, isAgentAccountError } from '@/server/services/agentIdentity';
-import type { AgentAccountError } from '@/server/services/agentIdentity/errors';
+import { AgentAccountError } from '@/server/services/agentIdentity/errors';
 import { AgentMailboxService } from '@/server/services/agentIdentity/mailbox';
 import { createDefaultAgentAccountRegistry } from '@/server/services/agentIdentity/providers';
 import { assertCanEditResource } from '@/server/services/resourcePermission';
@@ -141,6 +141,8 @@ const assertCanEditAll = async (ctx: MailContext, agentIds: string[]) => {
     });
   }
 };
+
+const DRAFT_SENDING_MESSAGE = 'This draft is being sent and can no longer be edited.';
 
 const assertDraftAccountUsable = async (ctx: MailContext, accountId: string) => {
   const account = await ctx.mailbox.requireAccount(accountId);
@@ -306,7 +308,11 @@ export const agentAccountMailRouter = router({
         const account = await assertDraftAccountUsable(ctx, input.accountId).catch(
           (error: unknown) => mapMailError(error, 'save'),
         );
-        return ctx.mailbox.drafts.create({ ...input, agentId: account.agentId });
+        const draft = await ctx.mailbox.drafts.create({ ...input, agentId: account.agentId });
+        if (!draft) {
+          mapMailError(new AgentAccountError('draft_sending', DRAFT_SENDING_MESSAGE), 'save');
+        }
+        return draft!;
       }),
 
     update: mailWriteProcedure
@@ -315,8 +321,13 @@ export const agentAccountMailRouter = router({
         const { id, ...content } = input;
         await ctx.mailbox.assertCanUseAll(await ctx.mailbox.drafts.listAgentIds([id]));
         const draft = await ctx.mailbox.drafts.update(id, content);
-        if (!draft) throw new TRPCError({ code: 'NOT_FOUND', message: 'Draft not found' });
-        return draft;
+        if (draft) return draft;
+        // Refused because a send holds it, not because it is gone: say so, so
+        // the client keeps the edit instead of treating the draft as deleted.
+        if (await ctx.mailbox.drafts.findById(id)) {
+          mapMailError(new AgentAccountError('draft_sending', DRAFT_SENDING_MESSAGE), 'save');
+        }
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Draft not found' });
       }),
 
     delete: mailWriteProcedure

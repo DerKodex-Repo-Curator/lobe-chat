@@ -10,6 +10,13 @@ import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 /** A send that outlives this died with its worker; its draft may be sent again. */
 export const DRAFT_SEND_LEASE_SECONDS = 2 * 60;
 
+/** No send holds the draft: edits now would race a send that already read it. */
+const sendLeaseFree = () =>
+  or(
+    isNull(agentMailDrafts.sendingAt),
+    lt(agentMailDrafts.sendingAt, sql`now() - make_interval(secs => ${DRAFT_SEND_LEASE_SECONDS})`),
+  );
+
 export interface AgentMailDraftContent {
   bcc?: AgentMailAddress[];
   cc?: AgentMailAddress[];
@@ -51,9 +58,11 @@ export class AgentMailDraftModel {
 
   /**
    * Create a draft. Answering a mail the same way again resumes the draft that
-   * already exists instead of opening a second one.
+   * already exists instead of opening a second one — unless that draft is being
+   * sent, which returns `undefined`: the edit would be lost when the send
+   * deletes it.
    */
-  create = async (params: SaveAgentMailDraftParams): Promise<AgentMailDraftItem> => {
+  create = async (params: SaveAgentMailDraftParams): Promise<AgentMailDraftItem | undefined> => {
     const values = buildWorkspacePayload({ userId: this.userId, workspaceId: this.workspaceId }, {
       accountId: params.accountId,
       agentId: params.agentId,
@@ -78,6 +87,7 @@ export class AgentMailDraftModel {
           to: values.to,
           updatedAt: new Date(),
         },
+        setWhere: sendLeaseFree(),
         target: [agentMailDrafts.accountId, agentMailDrafts.sourceMailId, agentMailDrafts.mode],
         targetWhere: sql`${agentMailDrafts.sourceMailId} is not null`,
       })
@@ -86,6 +96,7 @@ export class AgentMailDraftModel {
     return inserted;
   };
 
+  /** `undefined` when the draft is out of scope or being sent. */
   update = async (
     id: string,
     content: AgentMailDraftContent,
@@ -93,7 +104,7 @@ export class AgentMailDraftModel {
     const [row] = await this.db
       .update(agentMailDrafts)
       .set({ ...content, updatedAt: new Date() })
-      .where(and(eq(agentMailDrafts.id, id), this.ownership()))
+      .where(and(eq(agentMailDrafts.id, id), sendLeaseFree(), this.ownership()))
       .returning();
 
     return row;
@@ -184,19 +195,7 @@ export class AgentMailDraftModel {
     const [row] = await this.db
       .update(agentMailDrafts)
       .set({ sendingAt: sql`now()` })
-      .where(
-        and(
-          eq(agentMailDrafts.id, id),
-          or(
-            isNull(agentMailDrafts.sendingAt),
-            lt(
-              agentMailDrafts.sendingAt,
-              sql`now() - make_interval(secs => ${DRAFT_SEND_LEASE_SECONDS})`,
-            ),
-          ),
-          this.ownership(),
-        ),
-      )
+      .where(and(eq(agentMailDrafts.id, id), sendLeaseFree(), this.ownership()))
       .returning();
 
     return row;

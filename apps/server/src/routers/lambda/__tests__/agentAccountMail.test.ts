@@ -273,6 +273,27 @@ describe('drafts', () => {
     expect(drafts.create).not.toHaveBeenCalled();
   });
 
+  it('answers CONFLICT, not NOT_FOUND, for an edit while the draft is being sent', async () => {
+    drafts.findById.mockResolvedValueOnce({ id });
+
+    const error = await caller()
+      .drafts.update({ id, text: 'x' })
+      .catch((error_: unknown) => error_ as TRPCError);
+
+    expect(error).toMatchObject({ code: 'CONFLICT' });
+    expect(((error as TRPCError).cause as AgentAccountError).data).toEqual({
+      code: 'draft_sending',
+    });
+  });
+
+  it('answers CONFLICT when resuming a draft that is being sent', async () => {
+    drafts.create.mockResolvedValueOnce(undefined as any);
+
+    await expect(caller().drafts.create({ accountId, text: 'x' })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
+
   it('answers NOT_FOUND for a draft out of scope', async () => {
     await expect(caller().drafts.get({ id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(caller().drafts.update({ id, text: 'x' })).rejects.toMatchObject({

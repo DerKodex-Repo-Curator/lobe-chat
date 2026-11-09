@@ -70,7 +70,7 @@ let calls: Call[] = [];
 let replyResponse: { body: unknown; status: number } | undefined;
 
 /** The real provider over a fake lobe.id, so assertions see the actual request. */
-const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+const defaultFetch = async (url: string | URL, init?: RequestInit) => {
   const path = String(url).replace('https://api.test', '');
   const method = init?.method ?? 'GET';
   calls.push({ body: init?.body ? JSON.parse(String(init.body)) : undefined, method, path });
@@ -99,7 +99,8 @@ const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
       : json({ id: 'prov_new', messageId: '<new@lobe.id>', references: [] });
   }
   return json({ error: { code: 'not_found' } }, 404);
-});
+};
+const fetchImpl = vi.fn(defaultFetch);
 
 const provider = createAgentMailProvider({
   apiBaseUrl: 'https://api.test',
@@ -255,6 +256,63 @@ describe('send', () => {
       references: ['<root@x.io>', '<source@x.io>'],
       threadKey: '<new@lobe.id>',
     });
+  });
+
+  it('fails the forward, sending nothing, when an attachment fails to download', async () => {
+    fetchImpl.mockImplementation(async (url: string | URL, init?: RequestInit) => {
+      const path = String(url).replace('https://api.test', '');
+      calls.push({ method: init?.method ?? 'GET', path });
+      if (path === '/v1/messages/prov_src') {
+        return new Response(
+          JSON.stringify({ attachments: [{ filename: 'a.txt', index: 0 }], inboxId: 'inbox_1' }),
+        );
+      }
+      if (path.endsWith('/attachments/0')) return new Response('down', { status: 503 });
+      return new Response(JSON.stringify({ id: 'prov_new' }));
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expectRefusal(
+      service().send({
+        accountId: 'acc',
+        mode: 'forward',
+        sourceMailId: 'mail_src',
+        text: 'fyi',
+        to: [{ address: 'eve@x.io' }],
+      }),
+      'send_failed',
+    );
+
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(recordSentMail).not.toHaveBeenCalled();
+    fetchImpl.mockImplementation(defaultFetch);
+    consoleError.mockRestore();
+  });
+
+  it('forwards without an attachment the provider no longer holds', async () => {
+    fetchImpl.mockImplementation(async (url: string | URL, init?: RequestInit) => {
+      const path = String(url).replace('https://api.test', '');
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ body, method: init?.method ?? 'GET', path });
+      if (path === '/v1/messages/prov_src') {
+        return new Response(
+          JSON.stringify({ attachments: [{ filename: 'a.txt', index: 0 }], inboxId: 'inbox_1' }),
+        );
+      }
+      if (path.endsWith('/attachments/0')) return new Response('gone', { status: 404 });
+      return new Response(JSON.stringify({ id: 'prov_new', messageId: '<n@x>' }));
+    });
+
+    await service().send({
+      accountId: 'acc',
+      mode: 'forward',
+      sourceMailId: 'mail_src',
+      text: 'fyi',
+      to: [{ address: 'eve@x.io' }],
+    });
+
+    expect(calls.find((call) => call.method === 'POST')?.body.attachments).toEqual([]);
+    fetchImpl.mockImplementation(defaultFetch);
   });
 
   it('still reports a sent mail when recording it fails', async () => {

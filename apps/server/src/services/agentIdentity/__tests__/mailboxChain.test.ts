@@ -148,12 +148,12 @@ describe('a person answering and filing mail', () => {
       text: 'first version',
       to: [{ address: 'bob@x.io' }],
     });
-    await mailbox.drafts.update(draft.id, { text: 'final version' });
+    await mailbox.drafts.update(draft!.id, { text: 'final version' });
 
-    await mailbox.sendDraft(draft.id);
+    await mailbox.sendDraft(draft!.id);
 
     expect(calls.at(-1)?.body).toMatchObject({ text: 'final version', to: ['bob@x.io'] });
-    expect(await mailbox.drafts.findById(draft.id)).toBeUndefined();
+    expect(await mailbox.drafts.findById(draft!.id)).toBeUndefined();
     expect(await onlyAgentMail('prov_new')).toMatchObject({ threadKey: '<new@lobe.id>' });
   });
 
