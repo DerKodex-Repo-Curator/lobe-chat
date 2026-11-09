@@ -51,7 +51,7 @@ const mail = vi.hoisted(() => ({
   listTrashTargets: vi.fn(async (): Promise<any[]> => []),
   markRead: vi.fn(async (ids: string[]) => ids.length),
   markUnread: vi.fn(async (ids: string[]) => ids.length),
-  moveToTrash: vi.fn(async (ids: string[]) => ids.length),
+  moveToTrash: vi.fn(async (ids: string[]) => ids),
   restore: vi.fn(async (ids: string[]) => ids.length),
   setStarred: vi.fn(async (ids: string[]) => ids.length),
 }));
@@ -161,6 +161,15 @@ describe('filing', () => {
 
     await expect(caller().trash({ ids: [id] })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(mail.moveToTrash).not.toHaveBeenCalled();
+  });
+
+  it('returns only the ids this call moved, so undo leaves the rest alone', async () => {
+    mail.moveToTrash.mockResolvedValueOnce([id]);
+
+    await expect(caller().trash({ ids: [id, accountId] })).resolves.toEqual({
+      count: 1,
+      ids: [id],
+    });
   });
 
   it('caps a batch', async () => {

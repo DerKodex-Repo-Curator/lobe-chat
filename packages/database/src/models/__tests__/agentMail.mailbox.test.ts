@@ -140,7 +140,7 @@ describe('folders', () => {
 
     expect(await stranger.listConversations({ agentId, folder: 'inbox' })).toEqual([]);
     expect(await stranger.findById(mail.id)).toBeUndefined();
-    expect(await stranger.moveToTrash([mail.id])).toBe(0);
+    expect(await stranger.moveToTrash([mail.id])).toEqual([]);
     expect(await stranger.setStarred([mail.id], true)).toBe(0);
     expect(await stranger.listPurgeTargets([mail.id])).toEqual([]);
   });
@@ -223,8 +223,8 @@ describe('bulk and conversations', () => {
     const b = await seed();
 
     expect(await model.setStarred([a.id, b.id], true)).toBe(2);
-    expect(await model.moveToTrash([a.id, b.id])).toBe(2);
-    expect(await model.moveToTrash([a.id, b.id])).toBe(0);
+    expect((await model.moveToTrash([a.id, b.id])).sort()).toEqual([a.id, b.id].sort());
+    expect(await model.moveToTrash([a.id, b.id])).toEqual([]);
     expect(await model.restore([a.id, b.id])).toBe(2);
     expect(await listIds('inbox')).toHaveLength(2);
   });
@@ -357,6 +357,31 @@ describe('purge', () => {
     await model.restore([mail.id]);
 
     expect(await model.claimForPurge([mail.id])).toEqual([]);
+  });
+
+  it('keeps who a purged sent mail went to, so replies still wake the agent', async () => {
+    const sent = await seed({
+      cc: [{ address: 'carol@x.io', name: 'Carol' }],
+      direction: 'outbound',
+      fromAddress: 'agent@lobe.id',
+      threadKey: 'purged-thread',
+      to: [{ address: 'bob@x.io', name: 'Bob' }],
+    });
+    await model.moveToTrash([sent.id]);
+    await model.purge([sent.id]);
+
+    const [row] = await serverDB.select().from(agentMails).where(eq(agentMails.id, sent.id));
+    expect(row.to).toEqual([{ address: 'bob@x.io' }]);
+    expect(row.cc).toEqual([{ address: 'carol@x.io' }]);
+    for (const address of ['bob@x.io', 'carol@x.io']) {
+      expect(
+        await AgentMailModel.hasSentInThreadTo(serverDB, {
+          accountId,
+          address,
+          threadKey: 'purged-thread',
+        }),
+      ).toBe(true);
+    }
   });
 
   it('keeps a provider retry from delivering the mail afresh', async () => {

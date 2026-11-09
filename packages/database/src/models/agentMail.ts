@@ -145,6 +145,10 @@ const purgeClaimFree = () =>
     lt(agentMails.purgeClaimedAt, sql`now() - make_interval(secs => ${PURGE_CLAIM_LEASE_SECONDS})`),
   );
 
+/** A recipient list reduced to its addresses, for what a purge must keep. */
+const bareAddresses = (column: typeof agentMails.to | typeof agentMails.cc) =>
+  sql`(select coalesce(jsonb_agg(jsonb_build_object('address', recipient->>'address')), '[]'::jsonb) from jsonb_array_elements(${column}) as recipient)`;
+
 /** Lowercased and trimmed, the way `from_address` is stored and compared. */
 export const normalizeMailAddress = (address: string): string => address.trim().toLowerCase();
 
@@ -671,8 +675,12 @@ export class AgentMailModel {
   setStarred = async (ids: string[], starred: boolean): Promise<number> =>
     (await this.updateLive(ids, { starredAt: starred ? new Date() : null })).length;
 
-  moveToTrash = async (ids: string[]): Promise<number> =>
-    (await this.updateLive(ids, { trashedAt: new Date() }, isNull(agentMails.trashedAt))).length;
+  /**
+   * Returns the ids it moved — not the ones asked for. A mail someone else
+   * already trashed is left out, so an undo restores only what this call moved.
+   */
+  moveToTrash = async (ids: string[]): Promise<string[]> =>
+    this.updateLive(ids, { trashedAt: new Date() }, isNull(agentMails.trashedAt));
 
   /**
    * Not while a purge holds the mail: its provider copy may already be gone, and
@@ -773,6 +781,9 @@ export class AgentMailModel {
    * Wipe the content, keep the row. Deleting it would reset wake budgets and let
    * a provider retry deliver the mail afresh. `from_address`, the thread keys and
    * `codes` stay because delivery idempotency and the relay checks read them.
+   * A sent mail also keeps its `To` / `Cc` addresses, names dropped: whether the
+   * agent wrote to someone in a thread decides how that person's reply wakes it
+   * ({@link hasSentInThreadTo}), and purging must not change that.
    */
   purge = async (ids: string[]): Promise<number> => {
     if (ids.length === 0) return 0;
@@ -783,13 +794,13 @@ export class AgentMailModel {
         .set({
           attachments: [],
           bcc: [],
-          cc: [],
+          cc: sql`case when ${agentMails.direction} = 'outbound' then ${bareAddresses(agentMails.cc)} else '[]'::jsonb end`,
           fromName: null,
           purgedAt: new Date(),
           replyTo: [],
           subject: null,
           text: '',
-          to: [],
+          to: sql`case when ${agentMails.direction} = 'outbound' then ${bareAddresses(agentMails.to)} else '[]'::jsonb end`,
           updatedAt: new Date(),
         })
         .where(

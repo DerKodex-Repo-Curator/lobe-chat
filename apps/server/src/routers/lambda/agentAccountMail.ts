@@ -212,7 +212,8 @@ export const agentAccountMailRouter = router({
   trash: mailWriteProcedure.input(targetInput).mutation(async ({ ctx, input }) => {
     const ids = await resolveIds(ctx, input);
     await ctx.mailbox.assertCanUseAll(await ctx.mailbox.mail.listAgentIds(ids));
-    return { count: await ctx.mailbox.mail.moveToTrash(ids), ids };
+    const moved = await ctx.mailbox.mail.moveToTrash(ids);
+    return { count: moved.length, ids: moved };
   }),
 
   restore: mailWriteProcedure.input(targetInput).mutation(async ({ ctx, input }) => {
