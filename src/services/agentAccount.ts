@@ -5,6 +5,7 @@ import type {
 } from '@lobechat/types';
 import type { inferRouterOutputs } from '@trpc/server';
 
+import { getBusinessTrpcHeaders } from '@/business/client/trpc-headers';
 import { lambdaClient } from '@/libs/trpc/client';
 import type { LambdaRouter } from '@/server/routers/lambda';
 
@@ -17,6 +18,13 @@ type InboxRow = AgentAccountRouterOutputs['inbox']['get'];
  * credential is structurally absent, and `hasCredential` is all a read knows.
  */
 export type AgentAccountView = AgentAccountRouterOutputs['list'][number];
+
+/** One mail of an open conversation, oldest first. */
+export type AgentMailView = AgentAccountRouterOutputs['mail']['conversation'][number];
+export type AgentMailHtml = AgentAccountRouterOutputs['mail']['html'];
+export type AgentMailDraftInput = Parameters<
+  typeof lambdaClient.agentAccount.mail.drafts.create.mutate
+>[0];
 
 export interface ListAgentAccountsParams {
   agentId?: string;
@@ -40,6 +48,9 @@ export interface ListAgentInboxParams {
   limit?: number;
   unreadOnly?: boolean;
 }
+
+/** The provider no longer holds these bytes; retrying cannot help. */
+export class AttachmentExpiredError extends Error {}
 
 /** The detail read, normalized at the boundary into the client's read model. */
 const toInboxMessage = (row: InboxRow): AgentInboxMessage => ({
@@ -107,6 +118,40 @@ class AgentAccountService {
 
   markAllInboxRead = (agentId: string, accountId?: string) =>
     lambdaClient.agentAccount.inbox.markAllRead.mutate({ accountId, agentId });
+
+  // --------------- Mailbox ---------------
+
+  /** Accepts a mail's id or its inbox item's, oldest first; empty when it is gone. */
+  getMailConversation = (id: string): Promise<AgentMailView[]> =>
+    lambdaClient.agentAccount.mail.conversation.query({ id });
+
+  getMailHtml = (id: string): Promise<AgentMailHtml> =>
+    lambdaClient.agentAccount.mail.html.query({ id });
+
+  markMailRead = (ids: string[]) => lambdaClient.agentAccount.mail.markRead.mutate({ ids });
+
+  markMailUnread = (ids: string[]) => lambdaClient.agentAccount.mail.markUnread.mutate({ ids });
+
+  setMailStarred = (ids: string[], starred: boolean) =>
+    lambdaClient.agentAccount.mail.setStarred.mutate({ ids, starred });
+
+  trashMail = (ids: string[]) => lambdaClient.agentAccount.mail.trash.mutate({ ids });
+
+  restoreMail = (ids: string[]) => lambdaClient.agentAccount.mail.restore.mutate({ ids });
+
+  createMailDraft = (input: AgentMailDraftInput) =>
+    lambdaClient.agentAccount.mail.drafts.create.mutate(input);
+
+  /** An attachment's bytes through the server; a `404` means the provider dropped them. */
+  downloadMailAttachment = async (id: string, index: number): Promise<Blob> => {
+    const params = new URLSearchParams({ id, index: String(index) });
+    const response = await fetch(`/webapi/agent-mail/attachment?${params}`, {
+      headers: await getBusinessTrpcHeaders(),
+    });
+    if (response.status === 404) throw new AttachmentExpiredError();
+    if (!response.ok) throw new Error(`Attachment download failed: ${response.status}`);
+    return response.blob();
+  };
 }
 
 export const agentAccountService = new AgentAccountService();

@@ -6,6 +6,8 @@ import useSWRInfinite from 'swr/infinite';
 
 import { agentAccountService } from '@/services/agentAccount';
 
+import { idsToMarkReadOnOpen } from './conversation';
+
 const accountsKey = (agentId: string): [string, string] | null =>
   agentId ? ['agent-accounts', agentId] : null;
 
@@ -34,17 +36,19 @@ export const useInboxMessage = (id?: string) =>
  * its unread mark before the list and count load, so neither shows it as unread.
  */
 const openMessageFromUrl = async (id: string) => {
-  const message = await agentAccountService.getInboxMessage(id);
-  if (message.readAt) return message;
+  const conversation = await agentAccountService.getMailConversation(id);
+  const unread = idsToMarkReadOnOpen(conversation);
 
-  try {
-    await agentAccountService.markInboxRead([id]);
-  } catch (error) {
-    // The message still opens; a failed read-mark only affects the dot.
-    console.error('[AgentIdentity] mark read failed', error);
+  if (unread.length > 0) {
+    try {
+      await agentAccountService.markMailRead(unread);
+    } catch (error) {
+      // The message still opens; a failed read-mark only affects the dot.
+      console.error('[AgentIdentity] mark read failed', error);
+    }
   }
 
-  return message;
+  return { accountId: conversation[0]?.accountId };
 };
 
 /**
@@ -121,7 +125,10 @@ export const useAgentInbox = (agentId: string, accountId?: string) => {
     isLoading: inbox.isLoading,
     /** Fetch the next page without disturbing what is already on screen. */
     loadMore: () => void inbox.setSize((size) => size + 1),
+    /** Same, for a caller that needs the pages once they are in. */
+    loadNextPage: () => inbox.setSize((size) => size + 1),
     mutate: inbox.mutate,
+    pages,
   };
 };
 

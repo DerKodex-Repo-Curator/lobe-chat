@@ -16,6 +16,7 @@ import type { LobeChatDatabase } from '@/database/type';
 import { AgentAccountError, isAgentAccountError } from './errors';
 import { AgentInboxService } from './inbox';
 import type { AgentAccountService } from './index';
+import { type SanitizedMailHtml, sanitizeMailHtml } from './mailHtml';
 
 /** How many provider deletes run at once while purging. */
 const PURGE_CONCURRENCY = 10;
@@ -33,6 +34,9 @@ export interface SendAgentMailInput {
   text: string;
   to?: AgentMailAddress[];
 }
+
+export type AgentMailHtmlResult =
+  ({ status: 'ok' } & SanitizedMailHtml) | { status: 'expired' | 'failed' | 'none' };
 
 export interface PurgeAgentMailResult {
   count: number;
@@ -419,6 +423,50 @@ export class AgentMailboxService {
    * failure leaves that mail in the trash, intact, for the person to retry. The
    * caller has already proved it may edit the owning agents.
    */
+  /**
+   * A mail's HTML, sanitized, for a person reading it. Fetched on demand and
+   * never stored or handed to the agent, which only ever reads the plain text.
+   */
+  readHtml = async (id: string): Promise<AgentMailHtmlResult> => {
+    const mail = await this.mail.findById(id);
+    if (!mail) return { status: 'expired' };
+
+    let raw: null | string | undefined;
+    try {
+      raw = await this.accounts.getProviderMessageHtml(mail.accountId, mail.providerMessageId);
+    } catch (error) {
+      console.error('[AgentMailbox] read html failed', error);
+      return { status: 'failed' };
+    }
+
+    if (raw === undefined) return { status: 'expired' };
+    if (!raw) return { status: 'none' };
+
+    const sanitized = sanitizeMailHtml(raw);
+    if (!sanitized) return { status: 'failed' };
+    return { status: 'ok', ...sanitized };
+  };
+
+  /** An attachment's bytes and name; `null` when the mail or the bytes are gone. */
+  readAttachment = async (id: string, index: number) => {
+    const mail = await this.mail.findById(id);
+    const attachment = mail?.attachments?.find((item) => item.index === index);
+    if (!mail || !attachment) return null;
+
+    const file = await this.accounts.downloadProviderAttachment(
+      mail.accountId,
+      mail.providerMessageId,
+      index,
+    );
+    if (!file) return null;
+
+    return {
+      ...file,
+      contentType: attachment.contentType ?? file.contentType,
+      filename: attachment.filename,
+    };
+  };
+
   purge = async (targets: AgentMailPurgeTarget[]): Promise<PurgeAgentMailResult> => {
     const removed: string[] = [];
     let failed = 0;

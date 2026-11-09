@@ -6,14 +6,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const service = vi.hoisted(() => ({
   getInboxMessage: vi.fn(),
   getInboxUnreadCount: vi.fn(),
+  getMailConversation: vi.fn(),
+  getMailHtml: vi.fn(),
   list: vi.fn(),
   listInbox: vi.fn(),
   markAllInboxRead: vi.fn(),
   markInboxRead: vi.fn(),
+  markMailRead: vi.fn(),
   provision: vi.fn(),
   revoke: vi.fn(),
 }));
-vi.mock('@/services/agentAccount', () => ({ agentAccountService: service }));
+vi.mock('@/services/agentAccount', () => ({
+  agentAccountService: service,
+  AttachmentExpiredError: class extends Error {},
+}));
 
 const surface = vi.hoisted(() => ({ mobile: false }));
 vi.mock('@/utils/mobileSurface', () => ({ isMobileSurface: () => surface.mobile }));
@@ -97,6 +103,25 @@ const page = (path = '/agent/agt_1/mail') =>
     </SWRConfig>,
   );
 
+/** One conversation row, unread unless told otherwise. */
+const mailOf = (id: string, overrides: Record<string, unknown> = {}) => ({
+  accountId: 'acc_a',
+  attachments: [],
+  cc: [],
+  deliveredAt: new Date(),
+  direction: 'inbound',
+  fromAddress: `${id}@x.com`,
+  id,
+  inboxMessageId: id,
+  isUnread: true,
+  replyTo: [],
+  starredAt: null,
+  subject: 'Opened',
+  text: `Full body of ${id}`,
+  to: [{ address: 'agent@lobe.id' }],
+  ...overrides,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   surface.mobile = false;
@@ -106,12 +131,9 @@ beforeEach(() => {
   );
   service.getInboxUnreadCount.mockResolvedValue(1);
   service.markInboxRead.mockResolvedValue({ count: 1 });
-  service.getInboxMessage.mockImplementation(async (id: string) => ({
-    ...row(id, 'Opened'),
-    attachments: [],
-    text: `Full body of ${id}`,
-    to: 'agent@lobe.id',
-  }));
+  service.markMailRead.mockResolvedValue({ count: 1 });
+  service.getMailHtml.mockResolvedValue({ status: 'none' });
+  service.getMailConversation.mockImplementation(async (id: string) => [mailOf(id)]);
 });
 
 describe('AgentMail', () => {
@@ -120,7 +142,7 @@ describe('AgentMail', () => {
 
     await screen.findByText('preview of For A');
 
-    expect(service.getInboxMessage).not.toHaveBeenCalled();
+    expect(service.getMailConversation).not.toHaveBeenCalled();
     expect(service.markInboxRead).not.toHaveBeenCalled();
   });
 
@@ -151,13 +173,7 @@ describe('AgentMail', () => {
   });
 
   it('restores the mailbox of a message opened straight from its URL', async () => {
-    service.getInboxMessage.mockResolvedValue({
-      ...row('msg_b', 'For B'),
-      accountId: 'acc_b',
-      attachments: [],
-      text: 'Full body of msg_b',
-      to: 'b@lobe.id',
-    });
+    service.getMailConversation.mockResolvedValue([mailOf('msg_b', { accountId: 'acc_b' })]);
     page('/agent/agt_1/mail/msg_b');
 
     expect(await screen.findByText('preview of For B')).toBeInTheDocument();
@@ -171,26 +187,19 @@ describe('AgentMail', () => {
     page('/agent/agt_1/mail/msg_a');
 
     expect(await screen.findByText('Full body of msg_a')).toBeInTheDocument();
-    await waitFor(() => expect(service.markInboxRead).toHaveBeenCalledWith(['msg_a']));
-    expect(service.markInboxRead).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(service.markMailRead).toHaveBeenCalledWith(['msg_a']));
     // The list and count load after the mark, so neither shows it as unread.
-    expect(service.markInboxRead.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(service.markMailRead.mock.invocationCallOrder[0]).toBeLessThan(
       service.listInbox.mock.invocationCallOrder[0],
     );
   });
 
   it('does not re-stamp a read message opened from its URL', async () => {
-    service.getInboxMessage.mockResolvedValue({
-      ...row('msg_a', 'For A'),
-      attachments: [],
-      readAt: new Date(),
-      text: 'Full body of msg_a',
-      to: 'a@lobe.id',
-    });
+    service.getMailConversation.mockResolvedValue([mailOf('msg_a', { isUnread: false })]);
     page('/agent/agt_1/mail/msg_a');
 
     expect(await screen.findByText('Full body of msg_a')).toBeInTheDocument();
-    expect(service.markInboxRead).not.toHaveBeenCalled();
+    expect(service.markMailRead).not.toHaveBeenCalled();
   });
 
   it('asks for confirmation before releasing the mailbox on screen', async () => {

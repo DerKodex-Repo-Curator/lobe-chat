@@ -424,6 +424,37 @@ export class AgentAccountService {
     await provider.deleteMessage(this.toRef(account, credential), providerMessageId);
   };
 
+  /** The provider behind an address, when it can still answer for that address's mail. */
+  private providerForMail = async (accountId: string) => {
+    const account = await this.model.findById(accountId);
+    if (!account || !ROUTING_KEY_HELD_STATUSES.includes(account.status)) return undefined;
+    if (!this.options.registry.has(account.provider)) return undefined;
+
+    const credential = await this.model.getCredential(accountId);
+    return {
+      provider: this.options.registry.get(account.provider),
+      ref: this.toRef(account, credential),
+    };
+  };
+
+  /** A mail's raw HTML as {@link AgentAccountProvider.getMessageHtml} reports it. */
+  getProviderMessageHtml = async (accountId: string, providerMessageId: string) => {
+    const held = await this.providerForMail(accountId);
+    if (!held?.provider.getMessageHtml) return undefined;
+    return held.provider.getMessageHtml(held.ref, providerMessageId);
+  };
+
+  /** One attachment's bytes, `null` when the provider no longer holds them. */
+  downloadProviderAttachment = async (
+    accountId: string,
+    providerMessageId: string,
+    index: number,
+  ) => {
+    const held = await this.providerForMail(accountId);
+    if (!held?.provider.downloadAttachment) return null;
+    return held.provider.downloadAttachment(held.ref, providerMessageId, index);
+  };
+
   /**
    * Route one inbound webhook delivery:
    *

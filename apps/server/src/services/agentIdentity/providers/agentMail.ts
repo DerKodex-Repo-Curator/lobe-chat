@@ -318,6 +318,26 @@ export const createAgentMailProvider = (
       }
     },
 
+    downloadAttachment: async (ref: AgentAccountRef, providerMessageId: string, index: number) => {
+      try {
+        await assertInOwningInbox(ref, providerMessageId);
+      } catch (error) {
+        if (error instanceof LobeMailApiError && error.status === 404) return null;
+        throw error;
+      }
+      return client.downloadAttachment(providerMessageId, index);
+    },
+
+    getMessageHtml: async (ref: AgentAccountRef, providerMessageId: string) => {
+      try {
+        const message = await assertInOwningInbox(ref, providerMessageId);
+        return message.html;
+      } catch (error) {
+        if (error instanceof LobeMailApiError && error.status === 404) return undefined;
+        throw error;
+      }
+    },
+
     resolveInboundIdentifier: (request: AgentAccountInboundRequest): string | undefined => {
       const event = parse<EmailWebhookEvent>(request.body);
       return event?.data?.inbox?.address || undefined;

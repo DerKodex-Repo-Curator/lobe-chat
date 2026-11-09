@@ -7,10 +7,11 @@ import { useTranslation } from 'react-i18next';
 
 import NavHeader from '@/features/NavHeader';
 
-import InboxMessageDetail from './InboxMessageDetail';
+import InboxMessageDetail, { type InboxMessageDetailProps } from './InboxMessageDetail';
 import { identityStyles } from './styles';
 
 interface MailSplitViewProps {
+  detailProps: Omit<InboxMessageDetailProps, 'id'>;
   inbox: ReactNode;
   mailbox: ReactNode;
   /** The open message; nothing is opened on arrival, because opening clears its unread mark. */
@@ -18,7 +19,7 @@ interface MailSplitViewProps {
 }
 
 /** The mail page on a wide screen: mailbox and list on the left, the open message on the right. */
-const MailSplitView = ({ inbox, mailbox, messageId }: MailSplitViewProps) => {
+const MailSplitView = ({ detailProps, inbox, mailbox, messageId }: MailSplitViewProps) => {
   const { t } = useTranslation('setting');
 
   return (
@@ -26,12 +27,12 @@ const MailSplitView = ({ inbox, mailbox, messageId }: MailSplitViewProps) => {
       {/* The header belongs to the list column, so the message runs to the top of the page. */}
       <div className={identityStyles.listPane}>
         <NavHeader
+          styles={{ left: { minWidth: 0, paddingInlineStart: 8 } }}
           left={
             <Text fontSize={14} weight={500}>
               {t('identity.mail.title')}
             </Text>
           }
-          styles={{ left: { minWidth: 0, paddingInlineStart: 8 } }}
         />
         <Flexbox
           flex={1}
@@ -49,12 +50,12 @@ const MailSplitView = ({ inbox, mailbox, messageId }: MailSplitViewProps) => {
         {messageId ? (
           // The top keeps clear of what floats over the page header.
           <Flexbox
-            paddingBlock={'44px 16px'}
+            paddingBlock={'12px 16px'}
             paddingInline={16}
             style={{ marginInline: 'auto', maxWidth: 800 }}
             width={'100%'}
           >
-            <InboxMessageDetail id={messageId} />
+            <InboxMessageDetail {...detailProps} id={messageId} />
           </Flexbox>
         ) : (
           <Center height={'100%'}>

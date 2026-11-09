@@ -507,12 +507,34 @@ export class AgentMailModel {
     return row;
   };
 
+  /** A mail by its own id or by its inbox item's, which is what an inbox row links to. */
+  private findSeed = async (id: string) => {
+    const [row] = await this.db
+      .select({
+        accountId: agentMails.accountId,
+        id: agentMails.id,
+        threadKey: agentMails.threadKey,
+      })
+      .from(agentMails)
+      .leftJoin(agentInboxMessages, inboxItemOfMail)
+      .where(
+        and(
+          or(eq(agentMails.id, id), eq(agentInboxMessages.id, id)),
+          isNull(agentMails.purgedAt),
+          this.ownership(),
+        ),
+      )
+      .limit(1);
+
+    return row;
+  };
+
   /**
    * The conversation a mail belongs to, oldest first. Trash and the other
    * views are kept apart: opening a trashed mail shows only what was trashed.
    */
   listConversation = async (params: { folder?: AgentMailFolder; id: string }) => {
-    const seed = await this.findById(params.id);
+    const seed = await this.findSeed(params.id);
     if (!seed) return [];
 
     return this.db

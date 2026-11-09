@@ -5,13 +5,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const service = vi.hoisted(() => ({
   getInboxMessage: vi.fn(),
   getInboxUnreadCount: vi.fn(),
+  getMailConversation: vi.fn(),
+  getMailHtml: vi.fn(),
   list: vi.fn(),
   listInbox: vi.fn(),
   markAllInboxRead: vi.fn(),
   markInboxRead: vi.fn(),
+  markMailRead: vi.fn(),
   revoke: vi.fn(),
+  setMailStarred: vi.fn(),
+  trashMail: vi.fn(),
 }));
-vi.mock('@/services/agentAccount', () => ({ agentAccountService: service }));
+vi.mock('@/services/agentAccount', () => ({
+  agentAccountService: service,
+  AttachmentExpiredError: class extends Error {},
+}));
 
 // No provider configured: only already-owned addresses render.
 vi.mock('@/store/serverConfig', () => ({
@@ -19,11 +27,16 @@ vi.mock('@/store/serverConfig', () => ({
     selector({ serverConfig: { agentIdentityProviders: [] } }),
 }));
 
-const ui = vi.hoisted(() => ({ confirmModal: vi.fn(), createModal: vi.fn() }));
+const ui = vi.hoisted(() => ({
+  confirmModal: vi.fn(),
+  createModal: vi.fn(),
+  toastError: vi.fn(),
+}));
 vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   confirmModal: ui.confirmModal,
   createModal: ui.createModal,
+  toast: Object.assign(vi.fn(), { error: ui.toastError, success: vi.fn() }),
 }));
 
 const { IDENTITY_CHANNELS } = await import('./const');
@@ -40,39 +53,163 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('InboxMessageDetail', () => {
-  it('shows a retryable error instead of a skeleton that never resolves', async () => {
-    service.getInboxMessage.mockRejectedValueOnce(new Error('network down'));
+const detailProps = {
+  accounts: [{ id: 'acc_1', status: 'active' }] as never,
+  hasNext: true,
+  hasPrevious: false,
+  onBack: vi.fn(),
+  onDraftStarted: vi.fn(),
+  onEmptied: vi.fn(),
+  onNext: vi.fn(),
+  onPrevious: vi.fn(),
+  onReadStateChange: vi.fn(),
+  onRemoveFromList: vi.fn(() => vi.fn()),
+  onReseated: vi.fn(),
+  onRestored: vi.fn(),
+  onServerChanged: vi.fn(),
+};
 
-    fresh(<InboxMessageDetail id={'msg_1'} />);
+const mailRow = (id: string, overrides: Record<string, unknown> = {}) => ({
+  accountId: 'acc_1',
+  attachments: [],
+  cc: [],
+  deliveredAt: new Date('2026-10-02T00:00:00Z'),
+  direction: 'inbound',
+  fromAddress: `${id}@x.com`,
+  id,
+  inboxMessageId: id,
+  isUnread: false,
+  replyTo: [],
+  starredAt: null,
+  subject: 'Hello',
+  text: `body of ${id}`,
+  to: [{ address: 'agent@lobe.id' }],
+  ...overrides,
+});
+
+describe('InboxMessageDetail', () => {
+  beforeEach(() => {
+    service.getMailHtml.mockResolvedValue({ status: 'none' });
+  });
+
+  it('shows a retryable error instead of a skeleton that never resolves', async () => {
+    service.getMailConversation.mockRejectedValueOnce(new Error('network down'));
+
+    fresh(<InboxMessageDetail {...detailProps} id={'msg_1'} />);
 
     expect(await screen.findByText('identity.inbox.detail.loadFailed')).toBeInTheDocument();
+  });
+
+  it('opens the newest mail and collapses the older one until asked', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('old'), mailRow('new')]);
+
+    fresh(<InboxMessageDetail {...detailProps} id={'new'} />);
+
+    expect(await screen.findAllByText('body of new')).not.toHaveLength(0);
+    const [older] = screen.getAllByTestId('mail-summary');
+    expect(older).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(older);
+
+    expect(screen.getAllByTestId('mail-summary')[0]).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('renders HTML in a sandbox with no scripts and no same-origin', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('m')]);
+    service.getMailHtml.mockResolvedValue({
+      hasRemoteContent: true,
+      html: '<p>rich</p>',
+      status: 'ok',
+    });
+
+    fresh(<InboxMessageDetail {...detailProps} id={'m'} />);
+
+    const frame = await screen.findByTestId('mail-html-frame');
+    expect(frame.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox');
+    expect(screen.getByTestId('mail-remote-notice')).toBeInTheDocument();
+  });
+
+  it('falls back to the text and says so when the HTML has expired', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('m')]);
+    service.getMailHtml.mockResolvedValue({ status: 'expired' });
+
+    fresh(<InboxMessageDetail {...detailProps} id={'m'} />);
+
+    expect(await screen.findByText('identity.inbox.detail.htmlExpired')).toBeInTheDocument();
+    expect(screen.getByText('body of m')).toBeInTheDocument();
+  });
+
+  it('puts the star back and offers a retry when the write fails', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('m')]);
+    service.setMailStarred.mockRejectedValueOnce(new Error('nope'));
+
+    fresh(<InboxMessageDetail {...detailProps} id={'m'} />);
+
+    const star = (await screen.findByTestId('mail-action-star')) as HTMLElement;
+    fireEvent.click(star);
+
+    await waitFor(() => expect(ui.toastError).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByTestId('mail-action-star')).toHaveAttribute('aria-pressed', 'false'),
+    );
+  });
+
+  it('hands off to the page when trashing empties the conversation', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('m')]);
+    service.trashMail.mockResolvedValue({ count: 1, ids: ['m'] });
+
+    fresh(<InboxMessageDetail {...detailProps} id={'m'} />);
+
+    fireEvent.click(await screen.findByTestId('mail-action-trash'));
+
+    await waitFor(() => expect(detailProps.onEmptied).toHaveBeenCalledWith(['m']));
+    expect(service.trashMail).toHaveBeenCalledWith(['m']);
+  });
+
+  it('does not mark the landed-on conversation read until the reader touches it', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('m', { isUnread: true })]);
+    service.markMailRead.mockResolvedValue({ count: 1 });
+
+    fresh(<InboxMessageDetail {...detailProps} deferRead id={'m'} />);
+
+    const conversation = await screen.findByTestId('mail-conversation');
+    expect(service.markMailRead).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(conversation);
+
+    await waitFor(() => expect(service.markMailRead).toHaveBeenCalledWith(['m']));
+  });
+
+  it('hides every write for a released address', async () => {
+    service.getMailConversation.mockResolvedValue([mailRow('m', { accountId: 'gone' })]);
+
+    fresh(<InboxMessageDetail {...detailProps} id={'m'} />);
+
+    expect(await screen.findByText('identity.inbox.detail.released')).toBeInTheDocument();
+    expect(screen.queryByTestId('mail-action-trash')).toBeNull();
+    expect(screen.queryByTestId('mail-action-reply')).toBeNull();
   });
 });
 
 describe('InboxMessageDetail attachments', () => {
   it('lists what an attachment-only message carried instead of a blank body', async () => {
-    service.getInboxMessage.mockResolvedValue({
-      attachments: [
-        { contentType: 'image/jpeg', filename: 'photo.jpg', index: 0, size: 2_516_582 },
-        { contentType: 'application/pdf', index: 1 },
-      ],
-      from: '+15550001111',
-      id: 'msg_photo',
-      receivedAt: new Date('2026-10-02T00:00:00Z'),
-      subject: null,
-      text: '',
-      to: 'toby@lobe.id',
-    });
+    service.getMailHtml.mockResolvedValue({ status: 'none' });
+    service.getMailConversation.mockResolvedValue([
+      mailRow('msg_photo', {
+        attachments: [
+          { contentType: 'image/jpeg', filename: 'photo.jpg', index: 0, size: 2_516_582 },
+          { contentType: 'application/pdf', index: 1 },
+        ],
+        text: '',
+      }),
+    ]);
 
-    fresh(<InboxMessageDetail id={'msg_photo'} />);
+    fresh(<InboxMessageDetail {...detailProps} id={'msg_photo'} />);
 
-    // Named by file (or type) and size; nothing is fetched from the provider,
-    // so the list neither links nor previews what an outside sender sent.
-    expect(await screen.findByText('photo.jpg · 2.4 MB')).toBeInTheDocument();
+    expect(await screen.findByText('photo.jpg')).toBeInTheDocument();
+    expect(screen.getByText('2.4 MB')).toBeInTheDocument();
     expect(screen.getByText('application/pdf')).toBeInTheDocument();
-    expect(screen.queryByRole('link')).toBeNull();
-    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getAllByTestId('mail-attachment')).toHaveLength(2);
   });
 });
 

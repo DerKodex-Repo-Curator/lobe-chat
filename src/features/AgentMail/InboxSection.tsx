@@ -112,7 +112,7 @@ const InboxSection = memo<InboxSectionProps>(({ accountId, agentId, onOpen, sele
       {/* The list scrolls on its own so the header and addresses stay in view. */}
       <Flexbox flex={1} gap={2} style={{ minHeight: 0, overflowY: 'auto' }}>
         {messages.map((message) => {
-          const unread = !message.readAt;
+          const unread = !message.readAt || Boolean(message.markedUnread);
           const selected = message.id === selectedId;
 
           return (

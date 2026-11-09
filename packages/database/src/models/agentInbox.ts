@@ -138,6 +138,13 @@ const summaryColumns = {
   createdAt: agentInboxMessages.createdAt,
   from: agentInboxMessages.sender,
   id: agentInboxMessages.id,
+  /** A person asked to see it unread; `readAt` stays put because wakes key off it. */
+  markedUnread: sql<boolean>`exists (
+    select 1 from ${agentMails}
+    where ${agentMails.id} = ${agentInboxMessages.sourceId}
+      and ${agentInboxMessages.sourceType} = 'mail'
+      and ${agentMails.markedUnreadAt} is not null
+  )`,
   preview: agentInboxMessages.preview,
   readAt: agentInboxMessages.readAt,
   receivedAt: agentInboxMessages.receivedAt,
