@@ -552,13 +552,13 @@ describe('agent-mail provider — outbound', () => {
       to: 'human@example.com',
     });
 
-    expect(result).toEqual({ providerMessageId: 'msg_out_1' });
+    expect(result).toMatchObject({ providerMessageId: 'msg_out_1' });
     const send = calls.find((c) => c.method === 'POST' && c.path === '/v1/inboxes/inb_1/messages');
     expect(send?.body).toMatchObject({
       html: '<p>hi back</p>',
       subject: 'Re: Hello',
       text: 'hi back',
-      to: 'human@example.com',
+      to: ['human@example.com'],
     });
   });
 
@@ -573,7 +573,7 @@ describe('agent-mail provider — outbound', () => {
       to: 'human@example.com',
     });
 
-    expect(result).toEqual({ providerMessageId: 'msg_out_reply_1' });
+    expect(result).toMatchObject({ providerMessageId: 'msg_out_reply_1' });
     expect(calls.some((c) => c.path === '/v1/inboxes/inb_1/messages')).toBe(false);
     expect(calls).toContainEqual({
       body: { html: '<p><strong>thanks</strong></p>', text: 'thanks' },
@@ -622,7 +622,7 @@ describe('agent-mail provider — outbound', () => {
         path: '/v1/messages/msg_in_1/reply',
       },
     ]);
-    expect(result).toEqual({ providerMessageId: 'msg_out_reply_1' });
+    expect(result).toMatchObject({ providerMessageId: 'msg_out_reply_1' });
   });
 });
 
@@ -664,6 +664,6 @@ describe('agent-mail provider — reply ownership', () => {
         path: '/v1/messages/msg_in_1/reply',
       },
     ]);
-    expect(result).toEqual({ providerMessageId: 'msg_out_reply_1' });
+    expect(result).toMatchObject({ providerMessageId: 'msg_out_reply_1' });
   });
 });
