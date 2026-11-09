@@ -1,5 +1,6 @@
 'use client';
 
+import type { AgentMailFolder } from '@lobechat/types';
 import { Center, Empty, Flexbox, Text } from '@lobehub/ui';
 import { Mail } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -11,6 +12,7 @@ import InboxMessageDetail from './InboxMessageDetail';
 import { identityStyles } from './styles';
 
 interface MailSplitViewProps {
+  folder?: AgentMailFolder;
   inbox: ReactNode;
   mailbox: ReactNode;
   /** The open message; nothing is opened on arrival, because opening clears its unread mark. */
@@ -18,7 +20,7 @@ interface MailSplitViewProps {
 }
 
 /** The mail page on a wide screen: mailbox and list on the left, the open message on the right. */
-const MailSplitView = ({ inbox, mailbox, messageId }: MailSplitViewProps) => {
+const MailSplitView = ({ folder, inbox, mailbox, messageId }: MailSplitViewProps) => {
   const { t } = useTranslation('setting');
 
   return (
@@ -26,12 +28,12 @@ const MailSplitView = ({ inbox, mailbox, messageId }: MailSplitViewProps) => {
       {/* The header belongs to the list column, so the message runs to the top of the page. */}
       <div className={identityStyles.listPane}>
         <NavHeader
+          styles={{ left: { minWidth: 0, paddingInlineStart: 8 } }}
           left={
             <Text fontSize={14} weight={500}>
               {t('identity.mail.title')}
             </Text>
           }
-          styles={{ left: { minWidth: 0, paddingInlineStart: 8 } }}
         />
         <Flexbox
           flex={1}
@@ -54,7 +56,7 @@ const MailSplitView = ({ inbox, mailbox, messageId }: MailSplitViewProps) => {
             style={{ marginInline: 'auto', maxWidth: 800 }}
             width={'100%'}
           >
-            <InboxMessageDetail id={messageId} />
+            <InboxMessageDetail folder={folder} id={messageId} />
           </Flexbox>
         ) : (
           <Center height={'100%'}>

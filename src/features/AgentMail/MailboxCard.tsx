@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgentAccountView } from '@/services/agentAccount';
 import { useServerConfigStore } from '@/store/serverConfig';
 import { serverConfigSelectors } from '@/store/serverConfig/selectors';
+import { formatShortenNumber } from '@/utils/format';
 
 import AddMailboxForm from './AddMailboxForm';
 import { IDENTITY_CHANNELS, isChannelAccount, KIND_ICONS } from './const';
@@ -26,6 +27,7 @@ import ProvisionCard from './ProvisionCard';
 import { identityStyles } from './styles';
 import type { Mailbox } from './useAgentIdentity';
 import { useAccountActions } from './useIdentityActions';
+import { useMailCounts } from './useMailList';
 
 /**
  * Every lifecycle state gets a label, released included: the list filters
@@ -60,6 +62,10 @@ interface MailboxCardProps {
 const MailboxCard = memo<MailboxCardProps>(({ agentId, disabled, mailbox, onSwitch }) => {
   const { t } = useTranslation(['setting', 'common']);
   const { accounts, current, data, error, isLoading, mutate } = mailbox;
+  const { data: counts } = useMailCounts(
+    agentId,
+    accounts.map((account) => account.id),
+  );
   const providers = useServerConfigStore(serverConfigSelectors.agentIdentityProviders);
   const { release } = useAccountActions({
     agentId,
@@ -109,11 +115,11 @@ const MailboxCard = memo<MailboxCardProps>(({ agentId, disabled, mailbox, onSwit
         <AddMailboxForm
           agentId={agentId}
           channel={openable}
+          onChanged={mutate}
           onAdded={(account) => {
             onSwitch(account.id);
             modal.close();
           }}
-          onChanged={mutate}
         />
       ),
       footer: null,
@@ -128,7 +134,9 @@ const MailboxCard = memo<MailboxCardProps>(({ agentId, disabled, mailbox, onSwit
       icon:
         account.id === current.id ? Check : (channelOf(account)?.icon ?? KIND_ICONS[account.kind]),
       key: account.id,
-      label: account.identifier,
+      label: counts?.[account.id]?.unread
+        ? `${account.identifier} (${formatShortenNumber(counts[account.id].unread)})`
+        : account.identifier,
       onClick: () => onSwitch(account.id),
     })),
     ...(openable && !disabled
