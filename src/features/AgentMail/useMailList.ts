@@ -148,8 +148,6 @@ export const useMailList = ({ accountId, agentId, query, view }: MailListParams)
       // A new keyword keeps the last results on screen instead of flashing a skeleton.
       keepPreviousData: Boolean(query),
       refreshInterval: MAIL_REFRESH_INTERVAL_MS,
-      // A write can land on any loaded page, so a refresh has to cover them all.
-      revalidateAll: true,
     },
   );
 
@@ -170,6 +168,7 @@ export const useMailList = ({ accountId, agentId, query, view }: MailListParams)
     items,
     /** Fetch the next page without disturbing what is already on screen. */
     loadMore: () => void list.setSize((size) => size + 1),
+    /** Without arguments this revalidates every loaded page, which a write needs. */
     mutate: list.mutate,
   };
 };
