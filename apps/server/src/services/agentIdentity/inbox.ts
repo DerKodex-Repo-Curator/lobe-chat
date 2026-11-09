@@ -173,8 +173,12 @@ export class AgentInboxService {
    */
   recordSentMail = (params: {
     account: { agentId: string; id: string; identifier: string; provider: string };
+    bcc?: AgentMailAddress[];
+    cc?: AgentMailAddress[];
     inReplyTo?: string | null;
+    messageId?: string | null;
     providerMessageId: string;
+    references?: string[];
     subject?: string | null;
     text: string;
     threadKey?: string | null;
@@ -185,12 +189,16 @@ export class AgentInboxService {
       {
         accountId: params.account.id,
         agentId: params.account.agentId,
+        bcc: params.bcc,
+        cc: params.cc,
         deliveredAt: new Date(),
         direction: 'outbound',
         fromAddress: params.account.identifier,
         inReplyTo: params.inReplyTo,
+        messageId: params.messageId,
         provider: params.account.provider,
         providerMessageId: params.providerMessageId,
+        references: params.references,
         subject: params.subject,
         text: params.text,
         threadKey: params.threadKey,

@@ -1,4 +1,5 @@
 import type { AgentMailAddress, AgentMailAttachment, AgentMailDirection } from '@lobechat/types';
+import { sql } from 'drizzle-orm';
 import { index, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { createInsertSchema } from 'drizzle-zod';
 
@@ -63,6 +64,8 @@ export const agentMails = pgTable(
     fromName: text('from_name'),
     to: jsonb('to').$type<AgentMailAddress[]>().notNull().default([]),
     cc: jsonb('cc').$type<AgentMailAddress[]>().notNull().default([]),
+    /** Blind copies of a sent mail; inbound mail never reveals them. */
+    bcc: jsonb('bcc').$type<AgentMailAddress[]>().notNull().default([]),
     replyTo: jsonb('reply_to').$type<AgentMailAddress[]>().notNull().default([]),
 
     subject: text('subject'),
@@ -76,6 +79,22 @@ export const agentMails = pgTable(
     /** When the provider received it (inbound) or accepted it for sending (outbound). */
     deliveredAt: timestamptz('delivered_at').notNull(),
 
+    /** Mailbox state, shared by everyone who can see this agent's mail. */
+    starredAt: timestamptz('starred_at'),
+    /**
+     * A person asked to see this as unread. Separate from the inbox's `read_at`
+     * on purpose: wakes and digests key off `read_at`, and clearing it would
+     * make an already-handled mail wake the agent again.
+     */
+    markedUnreadAt: timestamptz('marked_unread_at'),
+    /** Moved to the trash; restoring clears it. */
+    trashedAt: timestamptz('trashed_at'),
+    /**
+     * Permanently deleted: content is wiped but the row stays, so delivery
+     * idempotency, wake budgets and relay checks keep counting it.
+     */
+    purgedAt: timestamptz('purged_at'),
+
     ...timestamps,
   },
   (t) => [
@@ -87,6 +106,20 @@ export const agentMails = pgTable(
     index('agent_mails_agent_delivered_at_idx').on(t.agentId, t.deliveredAt),
     index('agent_mails_signal_id_idx').on(t.signalId),
     index('agent_mails_user_id_idx').on(t.userId),
+    // Folder reads of one address: inbox and sent, newest first.
+    index('agent_mails_account_folder_idx')
+      .on(t.accountId, t.direction, t.deliveredAt)
+      .where(sql`${t.trashedAt} is null and ${t.purgedAt} is null`),
+    // The same reads across a workspace agent's addresses.
+    index('agent_mails_workspace_agent_folder_idx')
+      .on(t.workspaceId, t.agentId, t.direction, t.deliveredAt)
+      .where(sql`${t.trashedAt} is null and ${t.purgedAt} is null`),
+    index('agent_mails_account_trashed_idx')
+      .on(t.accountId, t.trashedAt)
+      .where(sql`${t.trashedAt} is not null and ${t.purgedAt} is null`),
+    index('agent_mails_account_starred_idx')
+      .on(t.accountId, t.deliveredAt)
+      .where(sql`${t.starredAt} is not null and ${t.trashedAt} is null and ${t.purgedAt} is null`),
   ],
 );
 

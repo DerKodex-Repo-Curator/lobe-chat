@@ -94,10 +94,13 @@ const stripTrailingSlashes = (url: string) => {
  */
 /** A non-2xx answer from the Agent Mail REST API, with its HTTP status kept. */
 export class LobeMailApiError extends Error {
+  /** The service's machine-readable reason (`upgrade_required`, …), when it sent one. */
+  readonly code?: string;
   readonly status: number;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
+    this.code = code;
     this.name = 'LobeMailApiError';
     this.status = status;
   }
@@ -128,8 +131,10 @@ export class LobeMailApiClient {
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       let detail = body;
+      let code: string | undefined;
       try {
         const parsed = JSON.parse(body) as EmailApiError;
+        code = parsed.error?.code;
         detail = parsed.error?.message || parsed.error?.code || body;
       } catch {
         // keep the raw body
@@ -139,6 +144,7 @@ export class LobeMailApiClient {
         `Agent Mail ${init.method ?? 'GET'} ${path} failed: ${response.status}${
           detail ? ` — ${detail}` : ''
         }`,
+        code,
       );
     }
 
@@ -218,6 +224,9 @@ export class LobeMailApiClient {
     }
   };
 
+  deleteMessage = (id: string): Promise<void> =>
+    this.request<void>(`/v1/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
   replyToMessage = (
     id: string,
     input: { html?: string; replyAll?: boolean; text?: string },
@@ -253,7 +262,15 @@ export class LobeMailApiClient {
 
   sendMessage = (
     inboxId: string,
-    input: { html?: string; subject: string; text?: string; to: string },
+    input: {
+      attachments?: { content: string; contentType?: string; filename: string }[];
+      bcc?: string[];
+      cc?: string[];
+      html?: string;
+      subject: string;
+      text?: string;
+      to: string | string[];
+    },
   ): Promise<EmailMessageDetail> =>
     this.request<EmailMessageDetail>(`/v1/inboxes/${encodeURIComponent(inboxId)}/messages`, {
       body: JSON.stringify(input),
