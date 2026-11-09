@@ -23,12 +23,12 @@ export const mailListStyles = stylex.create({
     opacity: {
       default: 0,
       [stylex.when.ancestor(':hover', mailRowMarker)]: 1,
-      [stylex.when.ancestor(':focus-within', mailRowMarker)]: 1,
+      [stylex.when.ancestor(':has(:focus-visible)', mailRowMarker)]: 1,
     },
     pointerEvents: {
       default: 'none',
       [stylex.when.ancestor(':hover', mailRowMarker)]: 'auto',
-      [stylex.when.ancestor(':focus-within', mailRowMarker)]: 'auto',
+      [stylex.when.ancestor(':has(:focus-visible)', mailRowMarker)]: 'auto',
     },
   },
   actionsAlways: {
@@ -51,7 +51,7 @@ export const mailListStyles = stylex.create({
     opacity: {
       default: 0,
       [stylex.when.ancestor(':hover', mailRowMarker)]: 1,
-      [stylex.when.ancestor(':focus-within', mailRowMarker)]: 1,
+      [stylex.when.ancestor(':has(:focus-visible)', mailRowMarker)]: 1,
     },
   },
   checkboxAlways: {
