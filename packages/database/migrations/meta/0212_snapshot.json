@@ -6,7 +6,7 @@
   },
   "dialect": "postgresql",
   "enums": {},
-  "id": "738eab87-7898-4428-b82c-ccd3d904af02",
+  "id": "97b9867c-f07d-4915-8f00-f3e2597cb6ff",
   "policies": {},
   "prevId": "45b20770-a9d5-4005-9171-07a02f3ec86d",
   "roles": {},
@@ -6809,6 +6809,12 @@
         },
         "purged_at": {
           "name": "purged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "purge_claimed_at": {
+          "name": "purge_claimed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

@@ -132,6 +132,19 @@ const folderFilter = (folder: AgentMailFolder | undefined) => {
   }
 };
 
+/**
+ * How long a purge holds a mail while its provider copy is deleted. A live purge
+ * finishes in seconds; the lease only ever expires on a worker that died.
+ */
+export const PURGE_CLAIM_LEASE_SECONDS = 5 * 60;
+
+/** No purge is deleting the provider copy right now. */
+const purgeClaimFree = () =>
+  or(
+    isNull(agentMails.purgeClaimedAt),
+    lt(agentMails.purgeClaimedAt, sql`now() - make_interval(secs => ${PURGE_CLAIM_LEASE_SECONDS})`),
+  );
+
 /** Lowercased and trimmed, the way `from_address` is stored and compared. */
 export const normalizeMailAddress = (address: string): string => address.trim().toLowerCase();
 
@@ -661,8 +674,53 @@ export class AgentMailModel {
   moveToTrash = async (ids: string[]): Promise<number> =>
     (await this.updateLive(ids, { trashedAt: new Date() }, isNull(agentMails.trashedAt))).length;
 
+  /**
+   * Not while a purge holds the mail: its provider copy may already be gone, and
+   * a restored mail without one could no longer be replied to or forwarded.
+   */
   restore = async (ids: string[]): Promise<number> =>
-    (await this.updateLive(ids, { trashedAt: null }, isNotNull(agentMails.trashedAt))).length;
+    (
+      await this.updateLive(
+        ids,
+        { trashedAt: null },
+        and(isNotNull(agentMails.trashedAt), purgeClaimFree()),
+      )
+    ).length;
+
+  /**
+   * Take the right to purge these trashed mails, before anything irreversible
+   * happens on the provider. Returns the ids claimed; a mail restored or claimed
+   * by another purge in the meantime is left out.
+   */
+  claimForPurge = async (ids: string[]): Promise<string[]> => {
+    if (ids.length === 0) return [];
+
+    const rows = await this.db
+      .update(agentMails)
+      .set({ purgeClaimedAt: sql`now()` })
+      .where(
+        and(
+          inArray(agentMails.id, ids),
+          isNotNull(agentMails.trashedAt),
+          isNull(agentMails.purgedAt),
+          purgeClaimFree(),
+          this.ownership(),
+        ),
+      )
+      .returning({ id: agentMails.id });
+
+    return rows.map((row) => row.id);
+  };
+
+  /** Hand back purge claims whose provider delete failed, so the mail can be restored. */
+  releasePurge = async (ids: string[]): Promise<void> => {
+    if (ids.length === 0) return;
+
+    await this.db
+      .update(agentMails)
+      .set({ purgeClaimedAt: null })
+      .where(and(inArray(agentMails.id, ids), this.ownership()));
+  };
 
   /** Of `ids`, those that may be purged: only what is already in the trash. */
   listPurgeTargets = async (ids: string[]): Promise<AgentMailPurgeTarget[]> => {
@@ -704,6 +762,8 @@ export class AgentMailModel {
           eq(agentMails.accountId, params.accountId),
           isNotNull(agentMails.trashedAt),
           isNull(agentMails.purgedAt),
+          // Held by another purge already: emptying would only contend for it.
+          purgeClaimFree(),
           this.ownership(),
         ),
       )

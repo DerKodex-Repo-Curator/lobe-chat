@@ -338,6 +338,27 @@ describe('purge', () => {
     expect(await model.restore([mail.id])).toBe(0);
   });
 
+  it('cannot be restored while a purge holds it, and can once the claim is handed back', async () => {
+    const mail = await seed();
+    await model.moveToTrash([mail.id]);
+
+    expect(await model.claimForPurge([mail.id])).toEqual([mail.id]);
+    expect(await model.claimForPurge([mail.id])).toEqual([]);
+    expect(await model.restore([mail.id])).toBe(0);
+    expect(await model.listTrashTargets({ accountId, limit: 10 })).toEqual([]);
+
+    await model.releasePurge([mail.id]);
+    expect(await model.restore([mail.id])).toBe(1);
+  });
+
+  it('does not claim a mail that was restored first', async () => {
+    const mail = await seed();
+    await model.moveToTrash([mail.id]);
+    await model.restore([mail.id]);
+
+    expect(await model.claimForPurge([mail.id])).toEqual([]);
+  });
+
   it('keeps a provider retry from delivering the mail afresh', async () => {
     const mail = await seed();
     await model.moveToTrash([mail.id]);

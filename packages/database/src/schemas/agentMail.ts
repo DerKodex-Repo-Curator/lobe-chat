@@ -94,6 +94,11 @@ export const agentMails = pgTable(
      * idempotency, wake budgets and relay checks keep counting it.
      */
     purgedAt: timestamptz('purged_at'),
+    /**
+     * Lease taken before the provider copy is deleted, so the mail cannot be
+     * restored while it is being destroyed on the provider.
+     */
+    purgeClaimedAt: timestamptz('purge_claimed_at'),
 
     ...timestamps,
   },

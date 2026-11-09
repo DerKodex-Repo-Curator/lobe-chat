@@ -22,6 +22,7 @@ ALTER TABLE "agent_mails" ADD COLUMN IF NOT EXISTS "starred_at" timestamp with t
 ALTER TABLE "agent_mails" ADD COLUMN IF NOT EXISTS "marked_unread_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "agent_mails" ADD COLUMN IF NOT EXISTS "trashed_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "agent_mails" ADD COLUMN IF NOT EXISTS "purged_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "agent_mails" ADD COLUMN IF NOT EXISTS "purge_claimed_at" timestamp with time zone;--> statement-breakpoint
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_mail_drafts_agent_id_agents_id_fk') THEN
     ALTER TABLE "agent_mail_drafts" ADD CONSTRAINT "agent_mail_drafts_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE cascade ON UPDATE no action;

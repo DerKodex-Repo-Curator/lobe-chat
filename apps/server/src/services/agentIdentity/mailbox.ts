@@ -420,11 +420,17 @@ export class AgentMailboxService {
    * caller has already proved it may edit the owning agents.
    */
   purge = async (targets: AgentMailPurgeTarget[]): Promise<PurgeAgentMailResult> => {
+    // Claimed first, so a restore cannot slip in between deleting the provider
+    // copy and wiping the row. Mails another request restored or claimed are
+    // skipped, not counted as failures.
+    const claimed = new Set(await this.mail.claimForPurge(targets.map((target) => target.id)));
+    const owned = targets.filter((target) => claimed.has(target.id));
     const removed: string[] = [];
+    const failedIds: string[] = [];
     let failed = 0;
 
-    for (let start = 0; start < targets.length; start += PURGE_CONCURRENCY) {
-      const batch = targets.slice(start, start + PURGE_CONCURRENCY);
+    for (let start = 0; start < owned.length; start += PURGE_CONCURRENCY) {
+      const batch = owned.slice(start, start + PURGE_CONCURRENCY);
       const results = await Promise.allSettled(
         batch.map((target) =>
           this.accounts.deleteProviderMessage(target.accountId, target.providerMessageId),
@@ -436,10 +442,13 @@ export class AgentMailboxService {
           removed.push(batch[index].id);
         } else {
           failed += 1;
+          failedIds.push(batch[index].id);
           console.error('[agentMailbox] provider delete failed:', result.reason);
         }
       });
     }
+
+    await this.mail.releasePurge(failedIds);
 
     return { count: await this.mail.purge(removed), failed };
   };

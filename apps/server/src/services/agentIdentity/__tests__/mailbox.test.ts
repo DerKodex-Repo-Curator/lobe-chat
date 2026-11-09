@@ -7,9 +7,11 @@ import { AgentAccountError } from '../errors';
 import { createAgentMailProvider } from '../providers/agentMail';
 
 const model = vi.hoisted(() => ({
+  claimForPurge: vi.fn(async (ids: string[]) => ids),
   findById: vi.fn(),
   findLatestInboundInThread: vi.fn(),
   purge: vi.fn(async (ids: string[]) => ids.length),
+  releasePurge: vi.fn(async (_ids: string[]) => {}),
 }));
 vi.mock('@/database/models/agentMail', () => ({
   AgentMailModel: vi.fn(function () {
@@ -463,6 +465,20 @@ describe('purge', () => {
     expect(result).toEqual({ count: 2, failed: 0 });
   });
 
+  it('claims before the provider delete and skips what someone else restored', async () => {
+    model.claimForPurge.mockResolvedValueOnce(['a']);
+
+    const result = await service().purge([target('a'), target('b')]);
+
+    expect(model.claimForPurge).toHaveBeenCalledWith(['a', 'b']);
+    expect(accounts.deleteProviderMessage).toHaveBeenCalledTimes(1);
+    expect(accounts.deleteProviderMessage).toHaveBeenCalledWith('acc', 'prov_a');
+    expect(model.claimForPurge.mock.invocationCallOrder[0]).toBeLessThan(
+      accounts.deleteProviderMessage.mock.invocationCallOrder[0],
+    );
+    expect(result).toEqual({ count: 1, failed: 0 });
+  });
+
   it('leaves a mail intact when its provider copy could not be deleted', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     accounts.deleteProviderMessage.mockImplementation(async (_accountId, id) => {
@@ -472,6 +488,7 @@ describe('purge', () => {
     const result = await service().purge([target('a'), target('b')]);
 
     expect(model.purge).toHaveBeenCalledWith(['a']);
+    expect(model.releasePurge).toHaveBeenCalledWith(['b']);
     expect(result).toEqual({ count: 1, failed: 1 });
     accounts.deleteProviderMessage.mockReset();
     accounts.deleteProviderMessage.mockResolvedValue(undefined);
