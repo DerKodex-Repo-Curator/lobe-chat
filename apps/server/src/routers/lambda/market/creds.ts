@@ -9,6 +9,11 @@ import { cloudWorkspaceAuth } from '@/business/server/trpc-middlewares/workspace
 import { publicProcedure, router } from '@/libs/trpc/lambda';
 import { marketUserInfo, requireMarketAuth, serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { MarketService } from '@/server/services/market';
+import { getSandboxProviderKind, MarketSandboxProvider } from '@/server/services/sandbox';
+import {
+  mergeCredsEnvListing,
+  resolveInjectedEnvVarsByKey,
+} from '@/server/services/sandbox/credsEnv';
 
 const log = debug('lambda-router:market:creds');
 
@@ -383,7 +388,30 @@ export const credsRouter = router({
           notFound: result.notFound?.length,
           success: result.success,
         });
-        return result;
+
+        const envVarsByKey = await resolveInjectedEnvVarsByKey(input.keys, result, (key) =>
+          ctx.marketService.market.creds.inject({
+            keys: [key],
+            sandbox: false,
+            topicId: input.topicId,
+            userId,
+          }),
+        );
+
+        // Market rewrites ~/.creds/env per call; merge it so earlier
+        // injections stay listed. Addressed like the inject call above.
+        if (input.sandbox && getSandboxProviderKind() === 'market') {
+          await mergeCredsEnvListing(
+            new MarketSandboxProvider({
+              marketService: ctx.marketService,
+              serverDB: ctx.serverDB,
+              topicId: input.topicId,
+              userId,
+            }),
+          );
+        }
+
+        return { ...result, envVarsByKey };
       } catch (error) {
         log('inject error: %O', error);
         throw new TRPCError({
