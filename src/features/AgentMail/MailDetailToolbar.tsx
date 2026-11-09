@@ -89,8 +89,8 @@ const MailDetailToolbar = memo<MailDetailToolbarProps>(
           )}
           {onToggleRead && (
             <ActionIcon
-              aria-pressed={unread}
               data-testid={'mail-action-unread'}
+              data-unread={unread}
               icon={unread ? MailOpen : Mail}
               aria-label={t(
                 unread ? 'identity.inbox.action.markRead' : 'identity.inbox.action.markUnread',
