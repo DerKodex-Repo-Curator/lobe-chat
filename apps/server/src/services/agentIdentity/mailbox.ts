@@ -360,6 +360,7 @@ export class AgentMailboxService {
     const recorded = await this.inbox
       .recordSentMail({
         account,
+        attachments: sent.attachments,
         bcc: record.bcc,
         cc: record.cc,
         inReplyTo: sent.inReplyTo ?? record.inReplyTo,

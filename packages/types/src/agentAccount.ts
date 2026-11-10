@@ -303,6 +303,12 @@ export interface AgentAccountOutboundMessage {
 
 /** What a provider accepted. The RFC headers are present when its transport has them. */
 export interface AgentAccountSendResult {
+  /**
+   * The attachments the provider actually carried, as descriptors. A forward
+   * sends bytes the provider already holds, so this is the only place the
+   * sender can learn what went out and file it under Sent.
+   */
+  attachments?: AgentMailAttachment[];
   inReplyTo?: string | null;
   messageId?: string | null;
   providerMessageId: string;

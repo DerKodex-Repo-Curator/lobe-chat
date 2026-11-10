@@ -254,6 +254,7 @@ describe('send', () => {
       },
     ]);
     expect(recordSentMail.mock.calls[0][0]).toMatchObject({
+      attachments: [{ contentType: 'text/plain', filename: 'a.txt', index: 0, size: 5 }],
       inReplyTo: '<source@x.io>',
       references: ['<root@x.io>', '<source@x.io>'],
       threadKey: '<new@lobe.id>',

@@ -21,6 +21,7 @@ import type {
   AgentAccountProvisionResult,
   AgentAccountRef,
   AgentAccountSendResult,
+  AgentMailAttachment,
 } from '@lobechat/types';
 import pMap from 'p-map';
 
@@ -154,15 +155,19 @@ export const createAgentMailProvider = (
   };
 
   /**
-   * The bytes of a forwarded message's attachments. One the provider no longer
-   * holds is skipped: its retention can be shorter than the mail's life here.
-   * Any other download failure fails the whole send.
+   * The bytes of a forwarded message's attachments, plus the descriptors that
+   * describe them once they are out. One the provider no longer holds is
+   * skipped: its retention can be shorter than the mail's life here. Any other
+   * download failure fails the whole send.
    */
   const loadForwardedAttachments = async (
     ref: AgentAccountRef,
     providerMessageId: string,
     indexes?: number[],
-  ) => {
+  ): Promise<{
+    descriptors: AgentMailAttachment[];
+    payloads: { content: string; contentType?: string; filename: string }[];
+  }> => {
     const source = await assertInOwningInbox(ref, providerMessageId);
     const wanted = (source.attachments ?? []).filter(
       (attachment) => !indexes || indexes.includes(attachment.index),
@@ -178,16 +183,28 @@ export const createAgentMailProvider = (
         // transient failure throws, and the forward fails without sending.
         const bytes = await client.fetchAttachment(providerMessageId, attachment.index);
         if (!bytes) return undefined;
+        const contentType = attachment.contentType || bytes.contentType;
+        const filename = attachment.filename ?? `attachment-${attachment.index}`;
+
         return {
-          content: bytes.buffer.toString('base64'),
-          contentType: attachment.contentType || bytes.contentType,
-          filename: attachment.filename ?? `attachment-${attachment.index}`,
+          descriptor: {
+            contentType,
+            filename,
+            index: attachment.index,
+            size: bytes.buffer.length,
+          } satisfies AgentMailAttachment,
+          payload: { content: bytes.buffer.toString('base64'), contentType, filename },
         };
       },
       { concurrency: 4 },
     );
 
-    return loaded.filter((item): item is NonNullable<typeof item> => !!item);
+    const kept = loaded.filter((item): item is NonNullable<typeof item> => !!item);
+
+    return {
+      descriptors: kept.map((item) => item.descriptor),
+      payloads: kept.map((item) => item.payload),
+    };
   };
 
   return {
@@ -283,6 +300,17 @@ export const createAgentMailProvider = (
       // `sendMessage` would open a second conversation carrying the same subject
       // and drop the human's thread. `threadKey` is the RFC root key, which is
       // not a message id, so it cannot address the reply.
+      // A forward carries bytes the provider already holds, so they are loaded
+      // once here and their descriptors ride back on the result: the caller
+      // files the mail under Sent and has nothing else to learn them from.
+      const forwarded = message.forwardAttachmentsOf
+        ? await loadForwardedAttachments(
+            ref,
+            message.forwardAttachmentsOf,
+            message.forwardAttachmentIndexes,
+          )
+        : undefined;
+
       const detail = message.replyToProviderMessageId
         ? await replyInOwningInbox(ref, message.replyToProviderMessageId, {
             html,
@@ -290,15 +318,7 @@ export const createAgentMailProvider = (
             text,
           })
         : await client.sendMessage(inboxIdOf(ref), {
-            ...(message.forwardAttachmentsOf
-              ? {
-                  attachments: await loadForwardedAttachments(
-                    ref,
-                    message.forwardAttachmentsOf,
-                    message.forwardAttachmentIndexes,
-                  ),
-                }
-              : {}),
+            ...(forwarded ? { attachments: forwarded.payloads } : {}),
             ...(message.bcc?.length ? { bcc: message.bcc } : {}),
             ...(message.cc?.length ? { cc: message.cc } : {}),
             html,
@@ -309,6 +329,7 @@ export const createAgentMailProvider = (
           });
 
       return {
+        ...(forwarded ? { attachments: forwarded.descriptors } : {}),
         inReplyTo: detail.inReplyTo,
         messageId: detail.messageId,
         providerMessageId: messageIdOf(detail),
