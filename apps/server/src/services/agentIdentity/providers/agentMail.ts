@@ -336,7 +336,7 @@ export const createAgentMailProvider = (
       // A response that carries no attachment list is the only case where the
       // loaded descriptors are still the best answer.
       const sentAttachments = forwarded
-        ? detail.attachments.length > 0
+        ? detail.attachments?.length
           ? detail.attachments.map(({ contentType, filename, index, size }) => ({
               contentType,
               filename: filename ?? undefined,
