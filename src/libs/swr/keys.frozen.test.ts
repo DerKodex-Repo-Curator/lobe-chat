@@ -23,7 +23,6 @@ const LEGACY_SWR_KEYS = [
   'authKeys.oidcInteraction',
   'botWakeKeys.decisions',
   'botWakeKeys.summary',
-  'briefKeys.news',
   'canvasKeys.storage',
   'changelogKeys.modalIndex',
   'changelogKeys.post',
