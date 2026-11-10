@@ -328,8 +328,26 @@ export const createAgentMailProvider = (
             to: [message.to, ...(message.additionalTo ?? [])],
           });
 
+      // The provider numbers the outgoing parts when it assembles the sent
+      // message: filtering out a requested attachment, or leaving out one past
+      // retention, shifts every index after it. File the descriptors it minted
+      // rather than the source ones, or Sent advertises download keys the new
+      // message does not have and re-forwarding from them silently drops parts.
+      // A response that carries no attachment list is the only case where the
+      // loaded descriptors are still the best answer.
+      const sentAttachments = forwarded
+        ? detail.attachments.length > 0
+          ? detail.attachments.map(({ contentType, filename, index, size }) => ({
+              contentType,
+              filename: filename ?? undefined,
+              index,
+              size,
+            }))
+          : forwarded.descriptors
+        : undefined;
+
       return {
-        ...(forwarded ? { attachments: forwarded.descriptors } : {}),
+        ...(sentAttachments ? { attachments: sentAttachments } : {}),
         inReplyTo: detail.inReplyTo,
         messageId: detail.messageId,
         providerMessageId: messageIdOf(detail),
