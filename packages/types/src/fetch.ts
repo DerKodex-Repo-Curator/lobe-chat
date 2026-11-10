@@ -17,6 +17,7 @@ export const ChatErrorType = {
   AgentShareProviderNotSupported: 'AgentShareProviderNotSupported', // This shared agent uses a provider that is not supported for shared visitors
   SupervisorDecisionFailed: 'SupervisorDecisionFailed', // Supervisor decision failed
   AgentConcurrencyLimitExceeded: 'AgentConcurrencyLimitExceeded', // The user already has as many agent runs in flight as allowed — recovers when one finishes
+  InsufficientBudgetForAgentRunFee: 'InsufficientBudgetForAgentRunFee', // The user's balance cannot cover the per-run agent fee — the run is refused before it starts
 
   InvalidUserKey: 'InvalidUserKey', // is not valid User key
   CreateMessageError: 'CreateMessageError',
