@@ -75,18 +75,21 @@ export class AgentMailDraftModel {
       to: params.to ?? [],
     } as NewAgentMailDraft);
 
+    // Only what the caller actually supplied overwrites the draft it resumes.
+    // Omitted content means "answer this mail again", not "erase what I wrote
+    // last time" — the insert above still fills the column defaults.
+    const overwrite: Partial<NewAgentMailDraft> = { updatedAt: new Date() };
+    if (params.bcc !== undefined) overwrite.bcc = values.bcc;
+    if (params.cc !== undefined) overwrite.cc = values.cc;
+    if (params.subject !== undefined) overwrite.subject = values.subject;
+    if (params.text !== undefined) overwrite.text = values.text;
+    if (params.to !== undefined) overwrite.to = values.to;
+
     const [inserted] = await this.db
       .insert(agentMailDrafts)
       .values(values)
       .onConflictDoUpdate({
-        set: {
-          bcc: values.bcc,
-          cc: values.cc,
-          subject: values.subject,
-          text: values.text,
-          to: values.to,
-          updatedAt: new Date(),
-        },
+        set: overwrite,
         setWhere: sendLeaseFree(),
         target: [agentMailDrafts.accountId, agentMailDrafts.sourceMailId, agentMailDrafts.mode],
         targetWhere: sql`${agentMailDrafts.sourceMailId} is not null`,

@@ -87,6 +87,44 @@ describe('AgentMailDraftModel', () => {
     expect(forward.id).not.toBe(first.id);
   });
 
+  it('keeps what it was not asked to change when the same draft is resumed', async () => {
+    const { mail } = await AgentMailModel.record(
+      serverDB,
+      {
+        accountId,
+        agentId,
+        deliveredAt: new Date(),
+        direction: 'inbound',
+        fromAddress: 'a@x.io',
+        provider: 'agent-mail',
+        providerMessageId: 'draft_src_resume',
+        text: 'source',
+      },
+      { userId },
+    );
+    const reply = { ...base(), mode: 'reply' as const, sourceMailId: mail.id };
+
+    await model.create({
+      ...reply,
+      subject: 'Re: source',
+      text: 'my answer',
+      to: [{ address: 'a@x.io' }],
+    });
+
+    // Answering the same mail again without content resumes what is there.
+    const resumed = (await model.create({ ...reply }))!;
+    expect(resumed).toMatchObject({
+      subject: 'Re: source',
+      text: 'my answer',
+      to: [{ address: 'a@x.io' }],
+    });
+
+    // Supplying a field still replaces it.
+    const edited = (await model.create({ ...reply, text: 'better answer' }))!;
+    expect(edited).toMatchObject({ subject: 'Re: source', text: 'better answer' });
+    expect(edited.to).toEqual([{ address: 'a@x.io' }]);
+  });
+
   it('lets one sender at a time claim a draft, and frees it on release', async () => {
     const draft = (await model.create(base()))!;
 
