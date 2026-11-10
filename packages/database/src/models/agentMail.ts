@@ -153,6 +153,40 @@ const bareAddresses = (column: typeof agentMails.to | typeof agentMails.cc) =>
 export const normalizeMailAddress = (address: string): string => address.trim().toLowerCase();
 
 /**
+ * The secrets a mail carries: links, long tokens, and runs of six or more
+ * letters and digits that mix both — lowercased, separators stripped. Read from
+ * `subject` and `text` while they still exist, so a purge can keep the material
+ * {@link AgentMailModel.findSecretRepeatedFromOtherSender} needs.
+ */
+const secretSource = (subject: typeof agentMails.subject, text: typeof agentMails.text) => {
+  const source = sql`coalesce(${subject}, '') || ' ' || ${text}`;
+
+  return sql`
+    select lower(regexp_replace(m[1], '[^0-9A-Za-z]', '', 'g')) as secret
+    from regexp_matches(${source}, ${SECRET_URL_PATTERN}, 'g') as m
+    union
+    select lower(regexp_replace(m[1], '[^0-9A-Za-z]', '', 'g'))
+    from regexp_matches(${source}, ${SECRET_LONG_TOKEN_PATTERN}, 'g') as m
+    union
+    select lower(m[1])
+    from regexp_matches(${source}, ${SECRET_ALNUM_RUN_PATTERN}, 'g') as m
+    where m[1] ~ '[0-9]' and m[1] ~ '[A-Za-z]'
+  `;
+};
+
+/**
+ * Everything both relay checks need, taken in one expression so a purge can
+ * keep it after wiping `subject` and `text`: the mail compacted to letters and
+ * digits (what `findTextFromOtherSender` matches candidates in), and the secrets
+ * it carried (what `findSecretRepeatedFromOtherSender` looks for meanwhile).
+ */
+const relayGuardOf = (subject: typeof agentMails.subject, text: typeof agentMails.text) =>
+  sql`jsonb_build_object(
+    'text', lower(regexp_replace(coalesce(${subject}, '') || ' ' || ${text}, '[^0-9A-Za-z]', '', 'g')),
+    'secrets', coalesce((select jsonb_agg(distinct s.secret) from (${secretSource(subject, text)}) as s), '[]'::jsonb)
+  )`;
+
+/**
  * Mail an agent's mail accounts received or sent.
  *
  * Inbound mail is recorded by the inbound edge (unscoped, before any user is
@@ -265,7 +299,9 @@ export class AgentMailModel {
           or(
             ...params.candidates.map(
               (candidate) =>
-                sql`strpos(lower(regexp_replace(coalesce(${agentMails.subject}, '') || ' ' || ${agentMails.text}, '[^0-9A-Za-z]', '', 'g')), ${candidate}) > 0`,
+                // A purged mail has no subject or body left; what it said is in
+                // `relay_guard`, so deleting it cannot quietly lift this check.
+                sql`(strpos(lower(regexp_replace(coalesce(${agentMails.subject}, '') || ' ' || ${agentMails.text}, '[^0-9A-Za-z]', '', 'g')), ${candidate}) > 0 or strpos(coalesce(${agentMails.relayGuard}->>'text', ''), ${candidate}) > 0)`,
             ),
           ),
         ),
@@ -324,20 +360,10 @@ export class AgentMailModel {
   }): Promise<{ from: string } | undefined> => {
     if (params.compactText.length === 0) return undefined;
 
-    const source = sql`coalesce(${agentMails.subject}, '') || ' ' || ${agentMails.text}`;
     // Each kind of secret is matched on its own, so a long fragment does not
-    // hide the shorter token inside it.
-    const secrets = sql`
-      select lower(regexp_replace(m[1], '[^0-9A-Za-z]', '', 'g')) as secret
-      from regexp_matches(${source}, ${SECRET_URL_PATTERN}, 'g') as m
-      union all
-      select lower(regexp_replace(m[1], '[^0-9A-Za-z]', '', 'g'))
-      from regexp_matches(${source}, ${SECRET_LONG_TOKEN_PATTERN}, 'g') as m
-      union all
-      select lower(m[1])
-      from regexp_matches(${source}, ${SECRET_ALNUM_RUN_PATTERN}, 'g') as m
-      where m[1] ~ '[0-9]' and m[1] ~ '[A-Za-z]'
-    `;
+    // hide the shorter token inside it. A purged mail has no subject or body
+    // left: the secrets read out of it before the wipe live in `relay_guard`.
+    const secrets = secretSource(agentMails.subject, agentMails.text);
 
     const [row] = await this.db
       .select({ from: agentMails.fromAddress })
@@ -349,9 +375,16 @@ export class AgentMailModel {
           eq(agentMails.direction, 'inbound'),
           gte(agentMails.deliveredAt, params.since),
           sql`${agentMails.fromAddress} <> ${normalizeMailAddress(params.recipient)}`,
-          sql`exists (
-            select 1 from (${secrets}) as s
-            where length(s.secret) >= 6 and strpos(${params.compactText}, s.secret) > 0
+          sql`(
+            exists (
+              select 1 from (${secrets}) as s
+              where length(s.secret) >= 6 and strpos(${params.compactText}, s.secret) > 0
+            )
+            or exists (
+              select 1
+              from jsonb_array_elements_text(coalesce(${agentMails.relayGuard}->'secrets', '[]'::jsonb)) as g(secret)
+              where length(g.secret) >= 6 and strpos(${params.compactText}, g.secret) > 0
+            )
           )`,
         ),
       )
@@ -781,6 +814,9 @@ export class AgentMailModel {
    * Wipe the content, keep the row. Deleting it would reset wake budgets and let
    * a provider retry deliver the mail afresh. `from_address`, the thread keys and
    * `codes` stay because delivery idempotency and the relay checks read them.
+   * `relay_guard` keeps what the relay checks need out of `subject` and `text`
+   * — codes are only the digit-shaped secrets — so purging a message cannot
+   * turn an unattended reply into a way to relay its link or token.
    * A sent mail also keeps its `To` / `Cc` addresses, names dropped: whether the
    * agent wrote to someone in a thread decides how that person's reply wakes it
    * ({@link hasSentInThreadTo}), and purging must not change that.
@@ -797,6 +833,9 @@ export class AgentMailModel {
           cc: sql`case when ${agentMails.direction} = 'outbound' then ${bareAddresses(agentMails.cc)} else '[]'::jsonb end`,
           fromName: null,
           purgedAt: new Date(),
+          // Read before `subject` and `text` are wiped in the same statement:
+          // the relay checks keep refusing to relay what this mail said.
+          relayGuard: relayGuardOf(agentMails.subject, agentMails.text),
           replyTo: [],
           subject: null,
           text: '',

@@ -785,6 +785,7 @@ table agent_mails {
   trashed_at "timestamp with time zone"
   purged_at "timestamp with time zone"
   purge_claimed_at "timestamp with time zone"
+  relay_guard jsonb
   accessed_at "timestamp with time zone" [not null, default: `now()`]
   created_at "timestamp with time zone" [not null, default: `now()`]
   updated_at "timestamp with time zone" [not null, default: `now()`]

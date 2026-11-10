@@ -1,0 +1,1 @@
+ALTER TABLE "agent_mails" ADD COLUMN IF NOT EXISTS "relay_guard" jsonb;
