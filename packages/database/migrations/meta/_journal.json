@@ -1488,15 +1488,22 @@
     {
       "idx": 212,
       "version": "7",
-      "when": 1794262588070,
-      "tag": "0212_agent_mail_mailbox_state",
+      "when": 1794296581452,
+      "tag": "0212_workspace_member_config",
       "breakpoints": true
     },
     {
       "idx": 213,
       "version": "7",
+      "when": 1794262588070,
+      "tag": "0213_agent_mail_mailbox_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
       "when": 1794269100692,
-      "tag": "0213_wooden_gambit",
+      "tag": "0214_wooden_gambit",
       "breakpoints": true
     }
   ],
